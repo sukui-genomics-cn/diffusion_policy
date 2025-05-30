@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, reduce
+from tqdm import tqdm
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
 from diffusion_policy.model.common.normalizer import LinearNormalizer
@@ -88,6 +89,7 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
                         modality.obs_randomizer_kwargs.crop_width = cw
 
         # init global state
+        print("init config")
         ObsUtils.initialize_obs_utils_with_config(config)
 
         # load model
@@ -96,9 +98,9 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
                 config=config,
                 obs_key_shapes=obs_key_shapes,
                 ac_dim=action_dim,
-                device='cpu',
+                device='cuda:0',
             )
-
+        print(f'policy: {policy}')
         obs_encoder = policy.nets['policy'].nets['encoder'].nets['obs']
         
         if obs_encoder_group_norm:
@@ -167,7 +169,8 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
         if num_inference_steps is None:
             num_inference_steps = noise_scheduler.config.num_train_timesteps
         self.num_inference_steps = num_inference_steps
-
+        print(f"model:{self.model}")
+        print(f"obs_encoder:{self.obs_encoder}")
         print("Diffusion params: %e" % sum(p.numel() for p in self.model.parameters()))
         print("Vision params: %e" % sum(p.numel() for p in self.obs_encoder.parameters()))
     
@@ -298,6 +301,7 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
             # reshape B, T, ... to B*T
             this_nobs = dict_apply(nobs, 
                 lambda x: x[:,:self.n_obs_steps,...].reshape(-1,*x.shape[2:]))
+            # print(f"obs encoder：image shape:{this_nobs['image'].shape} agent_pos shape: {this_nobs['agent_pos']}")
             nobs_features = self.obs_encoder(this_nobs)
             # reshape back to B, Do
             global_cond = nobs_features.reshape(batch_size, -1)
@@ -333,6 +337,7 @@ class DiffusionUnetHybridImagePolicy(BaseImagePolicy):
         noisy_trajectory[condition_mask] = cond_data[condition_mask]
         
         # Predict the noise residual
+        # print(f"start model to predict")
         pred = self.model(noisy_trajectory, timesteps, 
             local_cond=local_cond, global_cond=global_cond)
 
